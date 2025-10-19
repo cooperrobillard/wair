@@ -4,11 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write ."
   },
   "dependencies": {
+
     "@clerk/nextjs": "^6.33.7",
     "@hookform/resolvers": "^5.2.2",
     "@prisma/client": "^6.17.1",
