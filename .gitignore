@@ -42,3 +42,5 @@ next-env.d.ts
 
 # Track the example env template
 !.env.example
+
+/generated/prisma
