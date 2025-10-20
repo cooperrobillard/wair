@@ -67,7 +67,6 @@ export default function NewItemDialog() {
       if (!res.ok) throw new Error('Failed to create item');
 
       const { id, uploadPath } = (await res.json()) as { id: string; uploadPath: string };
-      console.log('[NewItemDialog] created item', { id, uploadPath });
 
       // 2) Optional: upload image to Supabase via server route
       let publicUrl: string | undefined;
@@ -83,12 +82,6 @@ export default function NewItemDialog() {
             : file.type.split('/')[1] || 'png';
 
         const pathWithExt = uploadPath.replace(/\.png$/, `.${ext}`);
-        console.log('[NewItemDialog] uploading file', {
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          pathWithExt,
-        });
 
         const fd = new FormData();
         fd.append('file', file);
@@ -100,11 +93,9 @@ export default function NewItemDialog() {
           body: fd,
         });
         const upJson = await up.json();
-        console.log('[NewItemDialog] upload response', { status: up.status, ok: up.ok, body: upJson });
         if (!up.ok) throw new Error(upJson.error || 'Upload failed');
 
         publicUrl = upJson.publicUrl;
-        console.log('[NewItemDialog] received public URL', { publicUrl });
 
         // 3) Patch item with imageUrl
         const patchRes = await fetch(`/api/items/${id}`, {
@@ -117,9 +108,6 @@ export default function NewItemDialog() {
           const txt = await patchRes.text();
           throw new Error(`Failed to save image URL: ${txt}`);
         }
-        console.log('[NewItemDialog] patched item with image URL', { id });
-      } else {
-        console.log('[NewItemDialog] no file selected, skipping upload');
       }
 
       toast.success('Item added');

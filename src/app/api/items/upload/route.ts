@@ -14,14 +14,6 @@ export async function POST(req: Request) {
   const path = form.get("path") as string | null;
   if (!file || !path) return NextResponse.json({ error: "file and path required" }, { status: 400 });
 
-  console.log("[api/items/upload] start", {
-    userId,
-    path,
-    fileName: file.name,
-    size: file.size,
-    type: file.type,
-  });
-
   const fileBuffer = Buffer.from(await file.arrayBuffer());
 
   const { error } = await supabaseServer.storage.from("items").upload(path, fileBuffer, {
@@ -34,14 +26,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Build a public URL for the just-uploaded object
   const { data } = supabaseServer.storage.from("items").getPublicUrl(path);
   if (!data?.publicUrl) {
     console.error("[api/items/upload] missing public URL", { path });
     return NextResponse.json({ error: "Unable to generate public URL" }, { status: 500 });
   }
-
-  console.log("[api/items/upload] success", { path });
 
   return NextResponse.json({ ok: true, publicUrl: data.publicUrl });
 }
