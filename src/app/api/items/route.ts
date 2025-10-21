@@ -21,6 +21,9 @@ export async function POST(req: Request) {
     }
 
     const user = await ensureDbUser(userId);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const item = await prisma.item.create({
       data: {
         userId: user.id,
