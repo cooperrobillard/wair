@@ -16,7 +16,7 @@ export default async function ItemsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  const user = await ensureDbUser();
+  const user = await ensureDbUser(userId);
   if (!user) redirect("/sign-in");
 
   const items: UIItem[] = await prisma.item.findMany({

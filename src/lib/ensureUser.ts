@@ -1,12 +1,13 @@
-import { auth } from '@clerk/nextjs/server';
-import { prisma } from './db';
+import { auth } from "@clerk/nextjs/server";
+import { prisma } from "./db";
 
-export async function ensureDbUser() {
-  const { userId } = await auth();
-  if (!userId) return null;
+export async function ensureDbUser(passedClerkId?: string) {
+  const clerkId = passedClerkId ?? (await auth()).userId;
+  if (!clerkId) return null;
 
-  const existing = await prisma.user.findUnique({ where: { clerkId: userId } });
-  if (existing) return existing;
-
-  return prisma.user.create({ data: { clerkId: userId } });
+  return prisma.user.upsert({
+    where: { clerkId },
+    update: {},
+    create: { clerkId },
+  });
 }
