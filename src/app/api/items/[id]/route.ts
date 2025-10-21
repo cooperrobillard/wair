@@ -13,9 +13,15 @@ export async function PATCH(
   }
 
   const body = await req.json().catch(() => null);
-  const imageUrl: unknown = body?.imageUrl;
-  if (typeof imageUrl !== "string" || imageUrl.trim() === "") {
-    return NextResponse.json({ error: "imageUrl required" }, { status: 400 });
+  const imageUrl = typeof body?.imageUrl === "string" ? body.imageUrl.trim() : undefined;
+  const originalUrl =
+    typeof body?.originalUrl === "string" ? body.originalUrl.trim() : undefined;
+
+  if (!imageUrl && !originalUrl) {
+    return NextResponse.json(
+      { error: "imageUrl or originalUrl required" },
+      { status: 400 }
+    );
   }
 
   // await the params
@@ -27,9 +33,13 @@ export async function PATCH(
     return NextResponse.json({ error: "No user" }, { status: 401 });
   }
 
+  const data: Record<string, string> = {};
+  if (imageUrl) data.imageUrl = imageUrl;
+  if (originalUrl) data.originalUrl = originalUrl;
+
   const updated = await prisma.item.updateMany({
     where: { id, userId: user.id },
-    data: { imageUrl: imageUrl.trim() },
+    data,
   });
 
   if (updated.count === 0) {

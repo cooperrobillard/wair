@@ -6,6 +6,8 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
+import { useAuth } from '@clerk/nextjs';
+import { supabase } from '@/lib/supabase';
 
 /**
  * Properly type the <input type="file"> value as FileList | undefined
@@ -34,6 +36,7 @@ export default function NewItemDialog() {
   const [open, setOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const { getToken } = useAuth();
 
   const {
     register,
@@ -50,75 +53,71 @@ export default function NewItemDialog() {
     try {
       setSubmitting(true);
 
-      // Normalize: empty string -> undefined
-      const normalizedSourceUrl =
-        values.sourceUrl && values.sourceUrl.trim() !== '' ? values.sourceUrl.trim() : undefined;
-
-      // 1) Create item row
+      // 1️⃣ Create item row
       const res = await fetch('/api/items', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rawInput: values.rawInput,
-          sourceUrl: normalizedSourceUrl,
+          sourceUrl: values.sourceUrl,
         }),
       });
       if (!res.ok) throw new Error('Failed to create item');
 
-      const { id, uploadPath } = (await res.json()) as { id: string; uploadPath: string };
+      const { id, originalUploadPath, publicBase } = (await res.json()) as {
+        id: string;
+        originalUploadPath: string;
+        publicBase: string;
+      };
 
-      // 2) Optional: upload image to Supabase via server route
-      let publicUrl: string | undefined;
-      const fileList = values.image ?? inputRef.current?.files ?? undefined;
+      // 2️⃣ Upload original image to Supabase (if provided)
+      const fileList = values.image ?? undefined;
       const file = fileList?.[0];
+      let originalPublicUrl: string | undefined = undefined;
 
       if (file) {
-        // keep extension sane
-        const extFromName = file.name.split('.').pop()?.toLowerCase();
-        const ext =
-          extFromName && ['png', 'jpg', 'jpeg', 'webp'].includes(extFromName)
-            ? extFromName
-            : file.type.split('/')[1] || 'png';
+        const { error: upErr } = await supabase.storage
+          .from('items')
+          .upload(originalUploadPath, file, { upsert: true });
 
-        const pathWithExt = uploadPath.replace(/\.png$/, `.${ext}`);
+        if (upErr) throw upErr;
 
-        const fd = new FormData();
-        fd.append('file', file);
-        fd.append('path', pathWithExt);
+        originalPublicUrl = `${publicBase}/${originalUploadPath}`;
 
-        const up = await fetch('/api/items/upload', {
-          method: 'POST',
-          credentials: 'include',
-          body: fd,
-        });
-        const upJson = await up.json();
-        if (!up.ok) throw new Error(upJson.error || 'Upload failed');
-
-        publicUrl = upJson.publicUrl;
-
-        // 3) Patch item with imageUrl
+        // PATCH originalUrl
         const patchRes = await fetch(`/api/items/${id}`, {
           method: 'PATCH',
-          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: publicUrl }),
+          body: JSON.stringify({ originalUrl: originalPublicUrl }),
         });
-        if (!patchRes.ok) {
-          const txt = await patchRes.text();
-          throw new Error(`Failed to save image URL: ${txt}`);
-        }
+        if (!patchRes.ok) throw new Error('Failed to save originalUrl');
       }
 
+      // 3️⃣ Request background removal
+      if (originalPublicUrl) {
+        const token = await getToken();
+        if (!token) {
+          throw new Error('Unable to authenticate background removal request.');
+        }
+
+        const cleanRes = await fetch(`/api/items/${id}/clean`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!cleanRes.ok) console.warn('Background removal failed, keeping original.');
+      }
+
+      // 4️⃣ Wrap up
       toast.success('Item added');
       reset();
       setOpen(false);
-      // simplest refresh so the list updates without importing router
       window.location.reload();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Something went wrong';
-      console.error('[NewItemDialog] submit failed', e);
-      toast.error(msg);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Something went wrong';
+      console.error(error);
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }

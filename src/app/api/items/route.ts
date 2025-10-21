@@ -1,13 +1,7 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { ensureDbUser } from "@/lib/ensureUser";
-
-const Body = z.object({
-  rawInput: z.string().min(2),
-  sourceUrl: z.string().url().optional(),
-});
 
 export const runtime = "nodejs";
 
@@ -18,22 +12,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const json = await req.json();
-    const parsed = Body.safeParse(json);
-    if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    const body = await req.json().catch(() => null);
+    const rawInput: unknown = body?.rawInput;
+    const sourceUrl: unknown = body?.sourceUrl;
+
+    if (typeof rawInput !== "string" || rawInput.trim().length < 2) {
+      return NextResponse.json({ error: "rawInput required" }, { status: 400 });
     }
 
     const user = await ensureDbUser(userId);
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const item = await prisma.item.create({
       data: {
         userId: user.id,
-        rawInput: parsed.data.rawInput,
-        sourceUrl: parsed.data.sourceUrl,
+        rawInput: rawInput.trim(),
+        sourceUrl: typeof sourceUrl === "string" ? sourceUrl : undefined,
       },
       select: { id: true },
     });
@@ -44,10 +36,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
     }
 
-    const uploadPath = `${userId}/${item.id}.png`;
+    const originalUploadPath = `original/${userId}/${item.id}.png`;
     const publicBase = `${supabaseUrl}/storage/v1/object/public/items`;
 
-    return NextResponse.json({ id: item.id, uploadPath, publicBase });
+    return NextResponse.json({
+      id: item.id,
+      originalUploadPath,
+      publicBase,
+    });
   } catch (error) {
     const err = error instanceof Error ? { message: error.message, stack: error.stack } : error;
     console.error("[api/items] failed to create item", err);
