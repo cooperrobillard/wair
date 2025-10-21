@@ -1,9 +1,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import type { Item } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { ensureDbUser } from "@/lib/ensureUser";
 import NewItemDialog from "@/components/NewItemDialog";
+
+type UIItem = {
+  id: string;
+  rawInput: string;
+  sourceUrl: string | null;
+  imageUrl: string | null;
+  createdAt: Date;
+};
 
 export default async function ItemsPage() {
   const { userId } = await auth();
@@ -12,9 +19,16 @@ export default async function ItemsPage() {
   const user = await ensureDbUser();
   if (!user) redirect("/sign-in");
 
-  const items: Item[] = await prisma.item.findMany({
+  const items: UIItem[] = await prisma.item.findMany({
     where: { userId: user.id },
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      rawInput: true,
+      sourceUrl: true,
+      imageUrl: true,
+      createdAt: true,
+    },
   });
 
   return (
