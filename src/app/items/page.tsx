@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import type { Item } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { ensureDbUser } from "@/lib/ensureUser";
 import NewItemDialog from "@/components/NewItemDialog";
@@ -11,7 +12,7 @@ export default async function ItemsPage() {
   const user = await ensureDbUser();
   if (!user) redirect("/sign-in");
 
-  const items = await prisma.item.findMany({
+  const items: Item[] = await prisma.item.findMany({
     where: { userId: user.id },
     orderBy: { createdAt: "desc" },
   });
