@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { ensureDbUser } from "@/lib/ensureUser";
+import { normalizeMultiColor, normalizeToCanonArticle } from "@/lib/normalize";
 
 export const runtime = "nodejs";
 
@@ -15,6 +16,10 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => null);
     const rawInput: unknown = body?.rawInput;
     const sourceUrl: unknown = body?.sourceUrl;
+    const articleType = typeof body?.articleType === "string" ? body.articleType.trim() : undefined;
+    const colorRaw = typeof body?.colorRaw === "string" ? body.colorRaw.trim() : undefined;
+    const brand = typeof body?.brand === "string" ? body.brand.trim() : undefined;
+    const name = typeof body?.name === "string" ? body.name.trim() : undefined;
 
     if (typeof rawInput !== "string" || rawInput.trim().length < 2) {
       return NextResponse.json({ error: "rawInput required" }, { status: 400 });
@@ -29,6 +34,10 @@ export async function POST(req: Request) {
         userId: user.id,
         rawInput: rawInput.trim(),
         sourceUrl: typeof sourceUrl === "string" ? sourceUrl : undefined,
+        articleType: articleType ? normalizeToCanonArticle(articleType) ?? undefined : undefined,
+        colorRaw: colorRaw ? normalizeMultiColor(colorRaw) ?? undefined : undefined,
+        brand: brand || undefined,
+        name: name || undefined,
       },
       select: { id: true },
     });

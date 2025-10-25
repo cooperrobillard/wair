@@ -3,14 +3,8 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { ensureDbUser } from "@/lib/ensureUser";
 import NewItemDialog from "@/components/NewItemDialog";
-
-type UIItem = {
-  id: string;
-  rawInput: string;
-  sourceUrl: string | null;
-  imageUrl: string | null;
-  createdAt: Date;
-};
+import ItemGrid, { type UIItem } from "@/components/ItemGrid";
+import { parseFreeform } from "@/lib/freeform-parse";
 
 export default async function ItemsPage() {
   const { userId } = await auth();
@@ -19,7 +13,7 @@ export default async function ItemsPage() {
   const user = await ensureDbUser(userId);
   if (!user) redirect("/sign-in");
 
-  const items: UIItem[] = await prisma.item.findMany({
+  const rawItems = await prisma.item.findMany({
     where: { userId: user.id },
     orderBy: { createdAt: "desc" },
     select: {
@@ -27,8 +21,31 @@ export default async function ItemsPage() {
       rawInput: true,
       sourceUrl: true,
       imageUrl: true,
+      originalUrl: true,
+      articleType: true,
+      colorRaw: true,
+      name: true,
+      brand: true,
       createdAt: true,
     },
+  });
+
+  const items: UIItem[] = rawItems.map((item) => {
+    const parsed = parseFreeform(item.rawInput ?? "");
+    const articleType = item.articleType ?? parsed.type ?? null;
+    const colorRaw = item.colorRaw ?? parsed.color ?? null;
+    return {
+      id: item.id,
+      rawInput: item.rawInput,
+      articleType,
+      colorRaw,
+      sourceUrl: item.sourceUrl,
+      imageUrl: item.imageUrl,
+      originalUrl: item.originalUrl,
+      name: item.name ?? null,
+      brand: item.brand ?? null,
+      createdAt: item.createdAt.toISOString(),
+    };
   });
 
   return (
@@ -38,46 +55,7 @@ export default async function ItemsPage() {
         <NewItemDialog />
       </div>
 
-      {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No items yet. Click “Add Item” to create your first piece.
-        </p>
-      ) : (
-        <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-          {items.map((it) => (
-            <li key={it.id} className="border rounded-xl p-3">
-              {it.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={it.imageUrl}
-                  alt="Item"
-                  className="w-full aspect-[4/5] object-cover rounded-lg border"
-                />
-              ) : (
-                <div className="w-full aspect-[4/5] rounded-lg border grid place-items-center text-xs text-muted-foreground">
-                  No image
-                </div>
-              )}
-              <div className="mt-2 space-y-1">
-                <p className="text-sm font-medium line-clamp-2">{it.rawInput}</p>
-                {it.sourceUrl && (
-                  <a
-                    href={it.sourceUrl}
-                    target="_blank"
-                    className="text-xs text-blue-600 underline"
-                    rel="noreferrer"
-                  >
-                    source link
-                  </a>
-                )}
-                <p className="text-[11px] text-muted-foreground">
-                  {new Date(it.createdAt).toLocaleString()}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ItemGrid initialItems={items} />
     </div>
   );
 }
