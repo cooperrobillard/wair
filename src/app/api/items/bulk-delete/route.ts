@@ -3,19 +3,22 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildStoragePaths } from "@/lib/storage-paths";
+import type { BulkDeleteResponse } from "@/types/api";
 
 const MAX_BULK_DELETE = 50;
 
 export async function POST(req: NextRequest) {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const response: BulkDeleteResponse = { ok: false, error: "Unauthorized" };
+    return NextResponse.json(response, { status: 401 });
   }
 
   const body = await req.json().catch(() => null);
   const idsInput: unknown = body?.ids;
   if (!Array.isArray(idsInput)) {
-    return NextResponse.json({ error: "ids array required" }, { status: 400 });
+    const response: BulkDeleteResponse = { ok: false, error: "ids array required" };
+    return NextResponse.json(response, { status: 400 });
   }
 
   const uniqueIds = Array.from(
@@ -27,13 +30,15 @@ export async function POST(req: NextRequest) {
   );
 
   if (uniqueIds.length === 0) {
-    return NextResponse.json({ error: "No valid ids provided" }, { status: 400 });
+    const response: BulkDeleteResponse = { ok: false, error: "No valid ids provided" };
+    return NextResponse.json(response, { status: 400 });
   }
   if (uniqueIds.length > MAX_BULK_DELETE) {
-    return NextResponse.json(
-      { error: `Too many ids; maximum ${MAX_BULK_DELETE}` },
-      { status: 400 }
-    );
+    const response: BulkDeleteResponse = {
+      ok: false,
+      error: `Too many ids; maximum ${MAX_BULK_DELETE}`,
+    };
+    return NextResponse.json(response, { status: 400 });
   }
 
   const user = await prisma.user.findUnique({
@@ -41,7 +46,8 @@ export async function POST(req: NextRequest) {
     select: { id: true },
   });
   if (!user) {
-    return NextResponse.json({ error: "No user" }, { status: 401 });
+    const response: BulkDeleteResponse = { ok: false, error: "No user" };
+    return NextResponse.json(response, { status: 401 });
   }
 
   const items = await prisma.item.findMany({
@@ -50,7 +56,12 @@ export async function POST(req: NextRequest) {
   });
 
   if (items.length === 0) {
-    return NextResponse.json({ ok: true, deletedIds: [], missingIds: uniqueIds });
+    const response: BulkDeleteResponse = {
+      ok: true,
+      deletedIds: [],
+      missingIds: uniqueIds,
+    };
+    return NextResponse.json(response);
   }
 
   const existingIds = items.map((item) => item.id);
@@ -75,19 +86,24 @@ export async function POST(req: NextRequest) {
 
   const storageKeys = Array.from(storageKeySet);
 
-  let storageError: string | null = null;
+  const storageErrors: Array<{ path: string; message: string }> = [];
   if (storageKeys.length > 0) {
     const { error } = await supabaseAdmin.storage.from("items").remove(storageKeys);
     if (error) {
-      storageError = error.message ?? "Failed to remove storage objects";
+      storageErrors.push({
+        path: "*",
+        message: error.message ?? "Failed to remove storage objects",
+      });
       console.error("[bulk-delete] storage remove failed", error);
     }
   }
 
-  return NextResponse.json({
+  const response: BulkDeleteResponse = {
     ok: true,
     deletedIds: existingIds,
     missingIds,
-    storageError,
-  });
+    ...(storageErrors.length ? { storageErrors } : {}),
+  };
+
+  return NextResponse.json(response);
 }

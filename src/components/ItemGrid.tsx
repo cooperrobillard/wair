@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { MoreVertical } from 'lucide-react';
 import { toast } from 'sonner';
+import type { BulkDeleteResponse } from '@/types/api';
 import NewItemDialog from '@/components/NewItemDialog';
 
 export type UIItem = {
@@ -193,19 +194,27 @@ export default function ItemGrid({ initialItems }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids }),
       });
-      const payload: { error?: string; failed?: Array<{ id: string; reason?: string }> } =
-        await res.json().catch(() => ({}));
+      const payload = (await res
+        .json()
+        .catch(() => ({ ok: false, error: 'Invalid response from server' }))) as BulkDeleteResponse;
+
       if (!res.ok) {
         setItems(snapshot);
-        throw new Error((payload?.error as string | undefined) || 'Failed to delete selected items');
+        const message =
+          payload.ok === false
+            ? payload.error
+            : 'Failed to delete selected items';
+        throw new Error(message);
       }
 
-      const deletedIds: string[] = Array.isArray(payload?.deletedIds)
-        ? payload.deletedIds.filter((id: unknown): id is string => typeof id === 'string')
-        : [];
-      const missingIds: string[] = Array.isArray(payload?.missingIds)
-        ? payload.missingIds.filter((id: unknown): id is string => typeof id === 'string')
-        : [];
+      if (!payload.ok) {
+        setItems(snapshot);
+        throw new Error(payload.error || 'Failed to delete selected items');
+      }
+
+      const deletedIds = payload.deletedIds;
+      const missingIds = payload.missingIds;
+      const storageErrors = payload.storageErrors ?? [];
 
       const deletedSet = new Set(deletedIds);
       const missingSet = new Set(missingIds);
@@ -244,7 +253,7 @@ export default function ItemGrid({ initialItems }: Props) {
         }
       }
 
-      if (payload?.storageError && typeof payload.storageError === 'string') {
+      if (storageErrors.length > 0) {
         const warningMessage = 'Items deleted but storage cleanup failed';
         const toastWithWarning = toast as typeof toast & { warning?: (message: string) => void };
         if (typeof toastWithWarning.warning === 'function') {
@@ -252,7 +261,7 @@ export default function ItemGrid({ initialItems }: Props) {
         } else {
           toast.message(warningMessage);
         }
-        console.error('[bulk delete] storage cleanup issue', payload.storageError);
+        console.error('[bulk delete] storage cleanup issue', storageErrors);
       }
     } catch (error) {
       const message =
