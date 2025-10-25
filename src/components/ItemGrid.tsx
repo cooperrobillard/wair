@@ -135,7 +135,7 @@ export default function ItemGrid({ initialItems }: Props) {
 
       try {
         const res = await fetch(`/api/items/${itemId}`, { method: 'DELETE' });
-        let payload: any = null;
+        let payload: { error?: string } | null = null;
         if (!res.ok && res.status !== 404) {
           payload = await res.json().catch(() => ({}));
           throw new Error((payload?.error as string | undefined) || 'Failed to delete item');
@@ -193,7 +193,8 @@ export default function ItemGrid({ initialItems }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids }),
       });
-      const payload = await res.json().catch(() => ({}));
+      const payload: { error?: string; failed?: Array<{ id: string; reason?: string }> } =
+        await res.json().catch(() => ({}));
       if (!res.ok) {
         setItems(snapshot);
         throw new Error((payload?.error as string | undefined) || 'Failed to delete selected items');

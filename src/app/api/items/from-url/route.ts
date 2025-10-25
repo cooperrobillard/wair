@@ -2,6 +2,18 @@ import { NextResponse } from "next/server";
 import { getAuth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { copyRemoteImageToSupabase } from "@/lib/image-ingest";
+import type { ScrapedProduct } from "@/lib/scrape-helpers";
+
+type FromUrlBody = {
+  url?: string;
+  rawInput?: string;
+  force?: string;
+};
+
+type ScrapeResponse = {
+  product?: Partial<ScrapedProduct>;
+  pathUsed?: string;
+};
 
 function getBaseUrl() {
   if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
@@ -14,7 +26,11 @@ export async function POST(req: Request) {
     const { userId: clerkId } = getAuth(req);
     if (!clerkId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { url, rawInput, force } = await req.json().catch(() => ({}));
+    const body = (await req.json().catch(() => null)) as FromUrlBody | null;
+    const url = body?.url;
+    const rawInput = body?.rawInput;
+    const force = body?.force;
+
     if (!url || typeof url !== "string") {
       return NextResponse.json({ error: "url required" }, { status: 400 });
     }
@@ -29,7 +45,7 @@ export async function POST(req: Request) {
 
     const baseUrl = getBaseUrl();
 
-    let product: any = null;
+    let product: Partial<ScrapedProduct> | null = null;
     let pathUsed: string | null = null;
     try {
       const scrapePayload =
@@ -41,9 +57,9 @@ export async function POST(req: Request) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(scrapePayload),
         cache: "no-store",
-      });
-      if (scrapeRes.ok) {
-        const json = await scrapeRes.json().catch(() => null);
+      }).catch(() => null);
+      if (scrapeRes?.ok) {
+        const json = (await scrapeRes.json().catch(() => null)) as ScrapeResponse | null;
         product = json?.product ?? null;
         pathUsed = typeof json?.pathUsed === "string" ? json.pathUsed : null;
       }
@@ -75,9 +91,10 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true, id: item.id, product, pathUsed: pathUsed ?? undefined });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error("[/api/items/from-url] unexpected", e);
-    return NextResponse.json({ error: e?.message ?? "Server error" }, { status: 500 });
+    const message = e instanceof Error ? e.message : "Server error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 export const runtime = "nodejs";

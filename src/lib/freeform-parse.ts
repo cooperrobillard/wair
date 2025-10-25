@@ -1,4 +1,3 @@
-/* eslint-disable no-control-regex */
 import { normalizeMultiColor, normalizeToCanonArticle } from "@/lib/normalize";
 export type ParseResult = {
   type?: string;
