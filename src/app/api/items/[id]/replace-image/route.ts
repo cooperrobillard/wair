@@ -6,13 +6,13 @@ import { cleanItemBackground } from "@/lib/clean-item";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  ctx: { params: Promise<{ id: string }> }
 ) {
   try {
     const { userId: clerkId } = getAuth(req);
     if (!clerkId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { id } = await params;
+    const { id } = await ctx.params;
     const { imageUrl } = await req.json().catch(() => ({}));
     if (typeof imageUrl !== "string" || !/^https?:\/\//i.test(imageUrl)) {
       return NextResponse.json({ error: "imageUrl required" }, { status: 400 });

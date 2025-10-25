@@ -6,7 +6,7 @@ import { cleanItemBackground } from "@/lib/clean-item";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  ctx: { params: Promise<{ id: string }> }
 ) {
   try {
     const { userId: clerkId } = getAuth(req);
@@ -18,7 +18,7 @@ export async function POST(
     });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 401 });
 
-    const { id } = await params;
+    const { id } = await ctx.params;
     const item = await prisma.item.findFirst({
       where: { id, userId: user.id },
       select: { id: true },

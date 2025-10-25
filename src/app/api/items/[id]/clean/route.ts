@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  ctx: { params: Promise<{ id: string }> }
 ) {
   try {
     const { userId: clerkId } = getAuth(req);
@@ -17,7 +17,7 @@ export async function POST(
     const apiKey = process.env.REMOVE_BG_API_KEY!;
     if (!apiKey) return NextResponse.json({ error: "Missing REMOVE_BG_API_KEY" }, { status: 500 });
 
-    const { id } = await params;
+    const { id } = await ctx.params;
 
     const publicBase = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/items`;
     const result = await cleanItemBackground({
