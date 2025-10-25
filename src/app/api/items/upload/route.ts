@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 
-export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   const { userId } = await auth();

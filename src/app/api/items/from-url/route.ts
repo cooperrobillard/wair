@@ -21,7 +21,6 @@ function getBaseUrl() {
   return "http://localhost:3000";
 }
 
-export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
