@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { getAuth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { copyRemoteImageToSupabase } from "@/lib/image-ingest";
@@ -21,7 +21,9 @@ function getBaseUrl() {
   return "http://localhost:3000";
 }
 
-export async function POST(req: Request) {
+export const runtime = "nodejs";
+
+export async function POST(req: NextRequest) {
   try {
     const { userId: clerkId } = getAuth(req);
     if (!clerkId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
