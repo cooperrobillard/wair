@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { queryItems } from "@/lib/query-items";
 
 export async function GET(req: Request) {
-  const { userId } = auth();
+  const { userId } = await auth();
   if (!userId) return new NextResponse("Unauthorized", { status: 401 });
 
   const url = new URL(req.url);
