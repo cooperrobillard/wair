@@ -2,6 +2,11 @@ import { prisma } from "@/lib/db";
 import { normalizeColorStd } from "@/lib/normalizeColor";
 import { normalizeArticleType } from "@/lib/normalizeArticle";
 
+const LEGACY_COLOR_SLASH_MAP: Record<string, string> = {
+  "Ivory/Off-White": "Ivory",
+  "Beige/Tan": "Beige",
+};
+
 async function main() {
   const slashColors = await prisma.item.findMany({
     where: { OR: [{ colorStd: "Ivory/Off-White" }, { colorStd: "Beige/Tan" }] },
@@ -9,17 +14,13 @@ async function main() {
   });
 
   for (const item of slashColors) {
-    let mapped: string | null = null;
-    if (item.colorStd === "Ivory/Off-White") mapped = "Ivory";
-    else if (item.colorStd === "Beige/Tan") mapped = "Beige";
+    const current = (item.colorStd ?? "") as string;
+    let mapped: string | null = LEGACY_COLOR_SLASH_MAP[current] ?? (current || null);
 
     const normalizedFromRaw = normalizeColorStd(item.colorRaw ?? null);
-    if (
-      normalizedFromRaw &&
-      normalizedFromRaw !== "Ivory/Off-White" &&
-      normalizedFromRaw !== "Beige/Tan"
-    ) {
-      mapped = normalizedFromRaw;
+    const normalizedStr = (normalizedFromRaw ?? null) as string | null;
+    if (normalizedStr) {
+      mapped = LEGACY_COLOR_SLASH_MAP[normalizedStr] ?? normalizedStr;
     }
 
     await prisma.item.update({
