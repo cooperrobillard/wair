@@ -48,13 +48,15 @@ export default function ItemGrid({ initialItems, initialSelectionMode = false }:
   const [editingItem, setEditingItem] = React.useState<UIItem | null>(null);
   const [editOpen, setEditOpen] = React.useState(false);
 
-  if (!items.length) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        No items match these filters. Try clearing filters or adjusting your search.
-      </p>
-    );
-  }
+  React.useEffect(() => {
+    setSelectionMode(initialSelectionMode);
+  }, [initialSelectionMode]);
+
+  React.useEffect(() => {
+    if (!selectionMode) {
+      setSelectedIds(new Set());
+    }
+  }, [selectionMode]);
 
   React.useEffect(() => {
     function handlePointer(event: MouseEvent | TouchEvent) {
@@ -279,16 +281,6 @@ export default function ItemGrid({ initialItems, initialSelectionMode = false }:
     setOpenMenuId(null);
   }, []);
 
-  React.useEffect(() => {
-    setSelectionMode(initialSelectionMode);
-  }, [initialSelectionMode]);
-
-  React.useEffect(() => {
-    if (!selectionMode) {
-      setSelectedIds(new Set());
-    }
-  }, [selectionMode]);
-
   return (
     <>
       <div className="space-y-3">
@@ -309,10 +301,10 @@ export default function ItemGrid({ initialItems, initialSelectionMode = false }:
         </div>
       )}
 
-      {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No items yet. Click “Add Item” to create your first piece.
-        </p>
+        {items.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No items match these filters. Try clearing filters or adjusting your search.
+          </p>
       ) : (
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
           {items.map((item) => {
