@@ -1,4 +1,6 @@
-import { normalizeMultiColor, normalizeToCanonArticle } from "@/lib/normalize";
+import { normalizeMultiColor } from "@/lib/normalize";
+import { normalizeArticleType } from "@/lib/normalizeArticle";
+import { normalizeColorStd, debugColor } from "@/lib/normalizeColor";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import OpenAI from "openai";
@@ -24,8 +26,8 @@ const SYSTEM_PROMPT = [
   "You extract clothing metadata as strict JSON.",
   "Allowed keys: name, brand, type, color.",
   "Only include keys that were requested in the 'need' list and can be confidently inferred from the provided text.",
-  "For type, pick ONLY from this list (case-insensitive) and return the canonical spelling: T-Shirt, Long Sleeve Shirt, Polo Shirt, Button-Up Shirt, Blouse, Tank Top, Crop Top, Sweatshirt, Hoodie, Sweater, Cardigan, Jacket, Coat, Blazer, Vest, Jeans, Dress Pants / Slacks, Chinos, Joggers, Sweatpants, Shorts, Skirt, Leggings, Cargo Pants, Dress, Jumpsuit, Romper, Overalls, Sneakers, Dress Shoes, Loafers, Boots, Sandals, Heels, Flats, Slides, Running Shoes. If none is present, omit the key.",
-  "For color, pick ONLY from this list (case-insensitive): Black, Charcoal, Light Gray, White, Ivory / Off-White, Beige / Tan, Brown, Navy, Olive, Denim, Red, Burgundy, Orange, Rust, Yellow, Green, Teal, Blue, Purple, Pink. If two colors are clearly present in roughly equal proportion, output them as 'Color A / Color B' using the canonical names; otherwise return a single color. If none is present, omit the key.",
+  "For type, pick ONLY from this list (case-insensitive) and return the canonical spelling: T-Shirt, Long Sleeve Shirt, Polo Shirt, Button-Up Shirt, Blouse, Tank Top, Crop Top, Sweatshirt, Hoodie, Sweater, Cardigan, Jacket, Coat, Blazer, Vest, Jeans, Dress Pants, Slacks, Chinos, Joggers, Sweatpants, Shorts, Skirt, Leggings, Cargo Pants, Dress, Jumpsuit, Rompers, Overalls, Sneakers, Dress Shoes, Loafers, Boots, Sandals, Heels, Flats, Slides, Running Shoes. If none is present, omit the key.",
+  "For color, pick ONLY from this list (case-insensitive): Black, Charcoal, Light Gray, White, Ivory, Off-White, Beige, Tan, Brown, Navy, Olive, Denim, Red, Burgundy, Orange, Rust, Yellow, Green, Teal, Blue, Purple, Pink. If two colors are clearly present in roughly equal proportion, output them as 'Color A / Color B' using the canonical names; otherwise return a single color. If none is present, omit the key.",
   "For name and brand, return concise strings without marketing fluff; if unknown, omit the key.",
   "Respond with a single JSON object only; no prose or explanation.",
 ].join("\n");
@@ -160,14 +162,20 @@ export async function POST(req: NextRequest) {
       if (!trimmed) continue;
 
       if (key === "type") {
-        const canonicalType = normalizeToCanonArticle(trimmed);
+        const canonicalType = normalizeArticleType(trimmed);
         if (canonicalType) filtered[key] = canonicalType;
         continue;
       }
 
       if (key === "color") {
         const canonicalColor = normalizeMultiColor(trimmed);
-        if (canonicalColor) filtered[key] = canonicalColor;
+        debugColor("normalizeColorStd.input.ai", {
+          color: trimmed,
+          canonicalColor,
+        });
+        const colorStd = normalizeColorStd(canonicalColor ?? trimmed);
+        debugColor("normalizeColorStd.output.ai", { colorStd });
+        if (colorStd) filtered[key] = colorStd;
         continue;
       }
 

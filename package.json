@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "backfill:colorStd": "ts-node --transpile-only scripts/backfill-colorStd.ts",
+    "backfill:slashes": "ts-node --transpile-only scripts/backfill-slashes.ts",
     "format": "prettier --write .",
     "postinstall": "prisma generate"
   },

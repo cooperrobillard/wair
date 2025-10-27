@@ -1,4 +1,5 @@
-import { normalizeMultiColor, normalizeToCanonArticle } from "@/lib/normalize";
+import { normalizeMultiColor } from "@/lib/normalize";
+import { normalizeArticleType } from "@/lib/normalizeArticle";
 export type ParseResult = {
   type?: string;
   color?: string;
@@ -242,7 +243,7 @@ export function parseFreeform(text: string): ParseResult {
     ? phraseMatch
     : baseMatch;
 
-  const normalizedType = typeMatch.label ? normalizeToCanonArticle(typeMatch.label) : null;
+  const normalizedType = typeMatch.label ? normalizeArticleType(typeMatch.label) : null;
   const normalizedColor = colorMatch.color ? normalizeMultiColor(colorMatch.color) : null;
 
   return {
@@ -316,7 +317,7 @@ export function parseFromProduct(input: {
   }
 
   if ((!parsedType || parsedType.length === 0) && input?.type) {
-    const canonicalType = normalizeToCanonArticle(input.type);
+    const canonicalType = normalizeArticleType(input.type);
     if (canonicalType) {
       parsedType = canonicalType;
       if (baseResult.confidence.type < 0.6) {

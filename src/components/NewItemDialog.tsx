@@ -7,8 +7,10 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { CANON_ARTICLES, CANON_COLORS, normalizeMultiColor, normalizeToCanonArticle } from '@/lib/normalize';
-import { normalizeProductText, parseFreeform, parseFromProduct } from '@/lib/freeform-parse';
+import { CANON_COLORS, normalizeMultiColor } from '@/lib/normalize';
+import { CANONICAL_TYPES as CANON_ARTICLES, normalizeArticleType } from '@/lib/normalizeArticle';
+import { deriveColorStd } from '@/lib/normalizeColor';
+import { parseFreeform, parseFromProduct } from '@/lib/freeform-parse';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
@@ -77,7 +79,14 @@ const SourceUrlSchema = z
   .transform((v) => (v && v.length > 0 ? v : undefined));
 
 const FormSchema = z.object({
-  rawInput: z.string().min(2, 'Please describe the item.'),
+  rawInput: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (!value) return undefined;
+      const trimmed = value.trim();
+      return trimmed.length ? trimmed : undefined;
+    }),
   sourceUrl: SourceUrlSchema,
 });
 
@@ -131,27 +140,65 @@ export default function NewItemDialog({
   const [typeConfidence, setTypeConfidence] = React.useState(0);
   const [colorConfidence, setColorConfidence] = React.useState(0);
   const [aiRunning, setAiRunning] = React.useState(false);
-  const [colorPrimary, setColorPrimary] = React.useState('');
-  const [colorSecondary, setColorSecondary] = React.useState('');
-  const [allowSecondColor, setAllowSecondColor] = React.useState(false);
-  const applyColorValue = React.useCallback(
-    (value: string | null | undefined) => {
-      const canonical = value ? normalizeMultiColor(value) : null;
-      const parts = canonical ? canonical.split(' / ') : [];
-      setParsedColor(canonical ?? '');
-      setColorPrimary(parts[0] ?? '');
-      setColorSecondary(parts[1] ?? '');
-      setAllowSecondColor((prev) => {
-        if (!canonical) return false;
-        if (parts.length > 1) return true;
-        return prev;
-      });
+  const [formColorState, setFormColorState] = React.useState<{
+    colorStd: string | null;
+    colorStd2: string | null;
+  }>({
+    colorStd: null,
+    colorStd2: null,
+  });
+
+  const canonicalizeColors = React.useCallback((primary: string | null, secondary: string | null) => {
+    const values = [primary, secondary]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value) => value.length > 0);
+    if (values.length === 0) return null;
+    const joined = values.join(' / ');
+    return normalizeMultiColor(joined) ?? joined;
+  }, []);
+
+  const setColorStateFromCanonical = React.useCallback(
+    (canonical: string | null, opts?: { confidence?: number }) => {
       if (!canonical) {
-        setColorConfidence(0);
+        setFormColorState({ colorStd: null, colorStd2: null });
+        setParsedColor('');
+        if (opts?.confidence !== undefined) {
+          setColorConfidence(opts.confidence);
+        } else {
+          setColorConfidence(0);
+        }
+        return;
       }
-      return canonical;
+
+      const parts = canonical
+        .split(' / ')
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0);
+      const primary = parts[0] ?? null;
+      const secondary = parts.length > 1 && parts[1] !== primary ? parts[1] : null;
+
+      setFormColorState({ colorStd: primary, colorStd2: secondary });
+      setParsedColor(canonical);
+      if (opts?.confidence !== undefined) {
+        setColorConfidence(opts.confidence);
+      } else {
+        setColorConfidence((prev) => (canonical ? Math.max(prev, 0.9) : 0));
+      }
     },
     [setColorConfidence]
+  );
+
+  const applyColorValue = React.useCallback(
+    (value: string | null | undefined, opts?: { confidence?: number }) => {
+      if (!value) {
+        setColorStateFromCanonical(null, opts);
+        return null;
+      }
+      const canonical = normalizeMultiColor(value) ?? value;
+      setColorStateFromCanonical(canonical, opts);
+      return canonical;
+    },
+    [setColorStateFromCanonical]
   );
 
   const [forceBrowserless, setForceBrowserless] = React.useState(false);
@@ -162,6 +209,8 @@ export default function NewItemDialog({
   const [stagedBrand, setStagedBrand] = React.useState<string | null>(null);
   const [stagedColor, setStagedColor] = React.useState<string | null>(null);
   const [stagedSourceUrl, setStagedSourceUrl] = React.useState<string | null>(null);
+  const aiDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aiRequestIdRef = React.useRef(0);
 
   const resetFetchedFromUrlState = React.useCallback(() => {
     setCreatedId(null);
@@ -193,19 +242,19 @@ export default function NewItemDialog({
   ]);
 
   const updateColorSelections = React.useCallback(
-    (primary: string, secondary: string) => {
-      const values = [primary, secondary].filter((value) => value && value.length);
-      if (values.length === 0) {
-        applyColorValue(null);
-        return;
+    (primary: string | null, secondary: string | null, opts?: { confidence?: number }) => {
+      const canonical = canonicalizeColors(primary, secondary);
+      setColorStateFromCanonical(canonical, opts);
+      if (canonical) {
+        setStagedColor(canonical);
+      } else {
+        setStagedColor(null);
       }
-      const joined = values.join(' / ');
-      const canonical = normalizeMultiColor(joined) ?? joined;
-      applyColorValue(canonical);
-      setColorConfidence(0.9);
     },
-    [applyColorValue, setColorConfidence]
+    [canonicalizeColors, setColorStateFromCanonical, setStagedColor]
   );
+
+  const { colorStd: formColorStd, colorStd2: formColorStd2 } = formColorState;
 
   const mergeWithParsed = React.useCallback(
     (raw: string, overrides?: { type?: string; color?: string }) => {
@@ -271,9 +320,6 @@ export default function NewItemDialog({
       setTypeConfidence(0);
       setColorConfidence(0);
       setAiRunning(false);
-      setColorPrimary('');
-      setColorSecondary('');
-      setAllowSecondColor(false);
       reset();
       setStagedFile(null);
       setStagedRemoteUrl(null);
@@ -289,17 +335,12 @@ export default function NewItemDialog({
     if (mode === 'edit' && initial) {
       setCreatedId(initial.id);
       const canonicalType = initial.articleType
-        ? normalizeToCanonArticle(initial.articleType) ?? initial.articleType
+        ? normalizeArticleType(initial.articleType) ?? initial.articleType
         : '';
       setParsedType(canonicalType ?? '');
       setTypeConfidence(canonicalType ? 1 : 0);
       const canonicalColor = applyColorValue(initial.colorRaw ?? null);
-      if (canonicalColor) {
-        setColorConfidence(1);
-      } else {
-        setColorConfidence(0);
-      }
-      setAllowSecondColor(canonicalColor ? canonicalColor.includes(' / ') : false);
+      setColorConfidence(canonicalColor ? 1 : 0);
       setItemName(initial.name ?? '');
       setItemBrand(initial.brand ?? '');
       setPreviewImg(initial.imageUrl ?? initial.originalUrl ?? null);
@@ -341,12 +382,21 @@ export default function NewItemDialog({
     }
     return undefined;
   }, [open]);
+  React.useEffect(() => {
+    return () => {
+      if (aiDebounceRef.current) {
+        clearTimeout(aiDebounceRef.current);
+        aiDebounceRef.current = null;
+      }
+    };
+  }, []);
 
-  const onSubmit = async (values: { rawInput: string; sourceUrl?: string }) => {
+  const onSubmit = async (values: z.infer<typeof FormSchema>) => {
     try {
       setSubmitting(true);
 
-      const mergedRawInput = mergeWithParsed(values.rawInput);
+      const rawInputValue = values.rawInput ?? '';
+      const mergedRawInput = mergeWithParsed(rawInputValue);
       setValue('rawInput', mergedRawInput, {
         shouldDirty: true,
         shouldTouch: true,
@@ -354,21 +404,22 @@ export default function NewItemDialog({
       });
 
       const trimmedArticleType = (parsedType ?? '').trim();
-      const trimmedColor = (parsedColor ?? '').trim();
       const trimmedName = itemName.trim();
       const trimmedBrand = itemBrand.trim();
+      const canonicalColorValue = canonicalizeColors(formColorStd, formColorStd2);
+      const rawColorValue = stagedColor && stagedColor.trim().length ? stagedColor.trim() : canonicalColorValue;
 
-      const canonicalArticle = trimmedArticleType ? normalizeToCanonArticle(trimmedArticleType) ?? undefined : undefined;
-      const canonicalColor = trimmedColor ? normalizeMultiColor(trimmedColor) ?? undefined : undefined;
+      const canonicalArticle = trimmedArticleType ? normalizeArticleType(trimmedArticleType) ?? undefined : undefined;
 
       if (mode === 'edit' && initial?.id) {
-        const payload: Record<string, string | undefined> = {
+        const payload: Record<string, string | null | undefined> = {
           name: trimmedName || undefined,
           brand: trimmedBrand || undefined,
           articleType: canonicalArticle,
-          colorRaw: canonicalColor,
+          colorRaw: rawColorValue,
+          colorStd: canonicalColorValue ?? undefined,
           sourceUrl: values.sourceUrl ? values.sourceUrl : undefined,
-          rawInput: mergedRawInput,
+          rawInput: mergedRawInput || undefined,
         };
 
         const res = await fetch(`/api/items/${initial.id}`, {
@@ -392,7 +443,7 @@ export default function NewItemDialog({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rawInput: mergedRawInput,
+          rawInput: mergedRawInput || undefined,
           sourceUrl: stagedSourceUrl ?? values.sourceUrl ?? undefined,
         }),
       });
@@ -471,19 +522,23 @@ export default function NewItemDialog({
         console.error('AI enrichment failed', error);
       }
 
-      const finalPatch: Record<string, string | undefined> = {};
+      const finalPatch: Record<string, string | null | undefined> = {};
 
       const applyArticle = (value?: string) => {
-        const canonical = value ? normalizeToCanonArticle(value) ?? undefined : undefined;
+        const canonical = value ? normalizeArticleType(value) ?? undefined : undefined;
         if (canonical) {
           finalPatch.articleType = canonical;
         }
       };
       const applyColor = (value?: string) => {
-        const canonical = value ? normalizeMultiColor(value) ?? undefined : undefined;
-        if (canonical) {
-          finalPatch.colorRaw = canonical;
+        if (!value) {
+          finalPatch.colorRaw = null;
+          finalPatch.colorStd = null;
+          return;
         }
+        const canonical = normalizeMultiColor(value) ?? value;
+        finalPatch.colorRaw = value;
+        finalPatch.colorStd = deriveColorStd(undefined, canonical) ?? canonical;
       };
 
       if (aiResult.name && aiResult.name.trim()) finalPatch.name = aiResult.name.trim();
@@ -504,10 +559,14 @@ export default function NewItemDialog({
       if (canonicalArticle) {
         finalPatch.articleType = canonicalArticle;
       }
-      if (canonicalColor) {
-        finalPatch.colorRaw = canonicalColor;
+      if (canonicalColorValue) {
+        finalPatch.colorRaw = rawColorValue;
+        finalPatch.colorStd = canonicalColorValue;
       } else if (stagedColor) {
         applyColor(stagedColor);
+      } else {
+        finalPatch.colorRaw = rawColorValue;
+        finalPatch.colorStd = canonicalColorValue;
       }
       const sourceToPersist = stagedSourceUrl ?? values.sourceUrl;
       if (sourceToPersist) {
@@ -634,31 +693,10 @@ export default function NewItemDialog({
 
       const parsedAttrs = parseFromProduct(prod);
       setParsedType(parsedAttrs.type ?? '');
-      setAllowSecondColor(false);
-      applyColorValue(parsedAttrs.color ?? null);
+      applyColorValue(parsedAttrs.color ?? null, { confidence: parsedAttrs.confidence.color ?? 0 });
       setTypeConfidence(parsedAttrs.confidence.type ?? 0);
-      setColorConfidence(parsedAttrs.confidence.color ?? 0);
       setItemName(prod.name ?? '');
       setItemBrand(prod.brand ?? '');
-
-      const normalizedName = prod.name ? normalizeProductText(prod.name) : prod.name;
-      const seedBase = [prod.brand, normalizedName, prod.colorRaw, prod.type]
-        .filter(Boolean)
-        .join(', ');
-      const mergedSeed = mergeWithParsed(seedBase, parsedAttrs);
-      const targetSeed = mergedSeed || seedBase;
-
-      if (targetSeed) {
-        setValue('rawInput', targetSeed, {
-          shouldValidate: true,
-          shouldDirty: true,
-          shouldTouch: true,
-        });
-        setFetchHint(null);
-      } else {
-        setFetchHint("Couldn't parse details—please add a short description.");
-      }
-
       const aiTextParts = [
         prod.brand,
         prod.name,
@@ -666,12 +704,11 @@ export default function NewItemDialog({
         prod.description,
         prod.colorRaw,
         prod.type,
-        targetSeed,
       ].filter((segment): segment is string => typeof segment === 'string' && segment.trim().length > 0);
 
       const aiText = aiTextParts.join(' ');
 
-      await runAiEnrichment(aiText, {
+      runAiEnrichment(aiText, {
         type: parsedAttrs.type ?? '',
         typeConfidence: parsedAttrs.confidence.type ?? 0,
         color: parsedAttrs.color ?? '',
@@ -768,7 +805,7 @@ export default function NewItemDialog({
   }, [createdId, getValues, mergeWithParsed, setValue, setCurrentOriginalUrl, setUploadConfig]);
 
   const runAiEnrichment = React.useCallback(
-    async (
+    (
       text: string,
       options: {
         type?: string | null;
@@ -780,79 +817,98 @@ export default function NewItemDialog({
       const trimmedText = text?.trim();
       if (!trimmedText) return;
 
-      const currentTypeValue = options.type ?? parsedType;
-      const currentTypeConfidence = options.typeConfidence ?? typeConfidence;
-      const currentColorValue = options.color ?? parsedColor;
-      const currentColorConfidence = options.colorConfidence ?? colorConfidence;
-
-      const needSet = new Set<string>(['name', 'brand']);
-      if (!currentTypeValue || currentTypeConfidence < AI_CONFIDENCE_THRESHOLD) {
-        needSet.add('type');
-      }
-      if (!currentColorValue || currentColorConfidence < AI_CONFIDENCE_THRESHOLD) {
-        needSet.add('color');
+      if (aiDebounceRef.current) {
+        clearTimeout(aiDebounceRef.current);
+        aiDebounceRef.current = null;
       }
 
-      const need = Array.from(needSet);
-      if (!need.length) return;
+      const requestId = ++aiRequestIdRef.current;
 
-      setAiRunning(true);
-      try {
-        const res = await fetch('/api/ai-parse', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: trimmedText, need }),
-        });
-        if (res.status === 401) {
-          toast.error('Please sign in to use AI parsing.');
-          return;
+      aiDebounceRef.current = setTimeout(async () => {
+        aiDebounceRef.current = null;
+
+        const currentTypeValue = options.type ?? parsedType;
+        const currentTypeConfidence = options.typeConfidence ?? typeConfidence;
+        const currentColorValue = options.color ?? parsedColor;
+        const currentColorConfidence = options.colorConfidence ?? colorConfidence;
+
+        const needSet = new Set<string>(['name', 'brand']);
+        if (!currentTypeValue || currentTypeConfidence < AI_CONFIDENCE_THRESHOLD) {
+          needSet.add('type');
         }
-        if (!res.ok) {
+        if (!currentColorValue || currentColorConfidence < AI_CONFIDENCE_THRESHOLD) {
+          needSet.add('color');
+        }
+
+        const need = Array.from(needSet);
+        if (!need.length) return;
+
+        setAiRunning(true);
+        try {
+          const res = await fetch('/api/ai-parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: trimmedText, need }),
+          });
+          if (requestId !== aiRequestIdRef.current) {
+            return;
+          }
+          if (res.status === 401) {
+            toast.error('Please sign in to use AI parsing.');
+            return;
+          }
+          if (!res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            throw new Error((payload?.error as string | undefined) || 'AI request failed');
+          }
           const payload = await res.json().catch(() => ({}));
-          throw new Error((payload?.error as string | undefined) || 'AI request failed');
-        }
-        const payload = await res.json().catch(() => ({}));
-        const result = (payload?.result ?? {}) as Record<string, string | undefined>;
+          if (requestId !== aiRequestIdRef.current) {
+            return;
+          }
+          const result = (payload?.result ?? {}) as Record<string, string | undefined>;
 
-        if (typeof result.name === 'string' && result.name.trim()) {
-          setItemName(result.name.trim());
-        }
-        if (typeof result.brand === 'string' && result.brand.trim()) {
-          setItemBrand(result.brand.trim());
-        }
-        if (needSet.has('type') && typeof result.type === 'string' && result.type.trim()) {
-          const canonicalType = normalizeToCanonArticle(result.type.trim());
-          if (canonicalType) {
-            setParsedType(canonicalType);
-            setTypeConfidence(Math.max(currentTypeConfidence, 0.75));
+          if (typeof result.name === 'string' && result.name.trim()) {
+            setItemName(result.name.trim());
+          }
+          if (typeof result.brand === 'string' && result.brand.trim()) {
+            setItemBrand(result.brand.trim());
+          }
+          if (needSet.has('type') && typeof result.type === 'string' && result.type.trim()) {
+            const canonicalType = normalizeArticleType(result.type.trim());
+            if (canonicalType) {
+              setParsedType(canonicalType);
+              setTypeConfidence(Math.max(currentTypeConfidence, 0.75));
+            }
+          }
+          if (needSet.has('color') && typeof result.color === 'string' && result.color.trim()) {
+            const canonicalColor = normalizeMultiColor(result.color.trim());
+            if (canonicalColor) {
+              setStagedColor(result.color.trim());
+              applyColorValue(canonicalColor, { confidence: Math.max(currentColorConfidence, 0.75) });
+            }
+          }
+        } catch (error) {
+          if (requestId !== aiRequestIdRef.current) {
+            return;
+          }
+          console.error('[NewItemDialog] AI enrichment failed', error);
+          toast.error('Could not refine details with AI');
+        } finally {
+          if (requestId === aiRequestIdRef.current) {
+            setAiRunning(false);
           }
         }
-        if (needSet.has('color') && typeof result.color === 'string' && result.color.trim()) {
-          const canonicalColor = normalizeMultiColor(result.color.trim());
-          if (canonicalColor) {
-            setAllowSecondColor(false);
-            applyColorValue(canonicalColor);
-            setColorConfidence(Math.max(currentColorConfidence, 0.75));
-          }
-        }
-      } catch (error) {
-        console.error('[NewItemDialog] AI enrichment failed', error);
-        toast.error('Could not refine details with AI');
-      } finally {
-        setAiRunning(false);
-      }
+      }, 400);
     },
     [
       applyColorValue,
       colorConfidence,
       parsedColor,
       parsedType,
-      setColorConfidence,
       setItemBrand,
       setItemName,
       setParsedType,
       setTypeConfidence,
-      setAllowSecondColor,
       typeConfidence,
     ]
   );
@@ -1104,10 +1160,8 @@ export default function NewItemDialog({
 
       const parsed = parseFreeform(trimmed);
       setParsedType(parsed.type ?? '');
-      setAllowSecondColor(false);
-      applyColorValue(parsed.color ?? null);
+      applyColorValue(parsed.color ?? null, { confidence: parsed.confidence.color ?? 0 });
       setTypeConfidence(parsed.confidence.type ?? 0);
-      setColorConfidence(parsed.confidence.color ?? 0);
 
       if (!parsed.type && !parsed.color && !opts.silent) {
         toast.message('No extra details found');
@@ -1132,7 +1186,7 @@ export default function NewItemDialog({
         });
       }
     },
-    [applyColorValue, getValues, mergeWithParsed, runAiEnrichment, setAllowSecondColor, setValue]
+    [applyColorValue, getValues, mergeWithParsed, runAiEnrichment, setValue]
   );
 
   const rawInputRegister = register('rawInput', {
@@ -1141,6 +1195,16 @@ export default function NewItemDialog({
 
   const articleOptions = React.useMemo(() => [...CANON_ARTICLES], []);
   const colorOptions = React.useMemo(() => [...CANON_COLORS], []);
+
+  const trimmedName = itemName.trim();
+  const trimmedBrand = itemBrand.trim();
+  const hasArticleType = Boolean(parsedType.trim());
+  const hasColor = Boolean(
+    (formColorStd && formColorStd.length > 0) || (formColorStd2 && formColorStd2.length > 0)
+  );
+  const hasImage = Boolean(previewImg || stagedFile || stagedRemoteUrl);
+  const hasStructuredData = Boolean(trimmedName || trimmedBrand || hasArticleType || hasColor || hasImage);
+  const canSave = mode === 'edit' ? !submitting : !submitting && hasStructuredData;
 
   return (
     <>
@@ -1445,11 +1509,13 @@ export default function NewItemDialog({
                         <div className="mt-1 space-y-2">
                           <select
                             className="w-full rounded-md border p-2 text-sm"
-                            value={colorPrimary}
+                            value={formColorStd ?? ''}
                             onChange={(event) => {
                               const value = event.target.value;
-                              setColorPrimary(value);
-                              updateColorSelections(value, colorSecondary);
+                              const nextPrimary = value ? value : null;
+                              const nextSecondary = nextPrimary ? formColorStd2 : null;
+                              const nextConfidence = nextPrimary ? Math.max(colorConfidence, 0.9) : 0;
+                              updateColorSelections(nextPrimary, nextSecondary, { confidence: nextConfidence });
                             }}
                           >
                             <option value="">Unset</option>
@@ -1458,16 +1524,24 @@ export default function NewItemDialog({
                                 {option}
                               </option>
                             ))}
+                            {formColorStd && !colorOptions.some((option) => option === formColorStd) ? (
+                              <option value={formColorStd}>{formColorStd}</option>
+                            ) : null}
                           </select>
-                          {allowSecondColor ? (
+                          {formColorStd2 !== null ? (
                             <div className="flex items-center gap-2">
                               <select
                                 className="flex-1 rounded-md border p-2 text-sm"
-                                value={colorSecondary}
+                                value={formColorStd2 ?? ''}
                                 onChange={(event) => {
                                   const value = event.target.value;
-                                  setColorSecondary(value);
-                                  updateColorSelections(colorPrimary, value);
+                                  const nextSecondary = value ? value : null;
+                                  const nextConfidence = nextSecondary
+                                    ? Math.max(colorConfidence, 0.9)
+                                    : Math.max(colorConfidence, 0.9);
+                                  updateColorSelections(formColorStd, nextSecondary, {
+                                    confidence: nextConfidence,
+                                  });
                                 }}
                               >
                                 <option value="">Unset</option>
@@ -1476,13 +1550,17 @@ export default function NewItemDialog({
                                     {option}
                                   </option>
                                 ))}
+                                {formColorStd2 &&
+                                !colorOptions.some((option) => option === formColorStd2) ? (
+                                  <option value={formColorStd2}>{formColorStd2}</option>
+                                ) : null}
                               </select>
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setAllowSecondColor(false);
-                                  setColorSecondary('');
-                                  updateColorSelections(colorPrimary, '');
+                                  updateColorSelections(formColorStd, null, {
+                                    confidence: Math.max(colorConfidence, 0.9),
+                                  });
                                 }}
                                 className="text-xs text-muted-foreground underline-offset-2 hover:underline"
                               >
@@ -1493,8 +1571,16 @@ export default function NewItemDialog({
                             <button
                               type="button"
                               onClick={() => {
-                                setAllowSecondColor(true);
+                                if (!formColorStd) return;
+                                const fallbackSecondary = colorOptions.find(
+                                  (option) => option !== formColorStd
+                                );
+                                if (!fallbackSecondary) return;
+                                updateColorSelections(formColorStd, fallbackSecondary, {
+                                  confidence: Math.max(colorConfidence, 0.9),
+                                });
                               }}
+                              disabled={!formColorStd}
                               className="text-xs text-muted-foreground underline-offset-2 hover:underline"
                             >
                               + Add second color
@@ -1522,7 +1608,7 @@ export default function NewItemDialog({
                   Cancel
                 </button>
                 <button
-                  disabled={submitting || (getValues('rawInput')?.trim().length ?? 0) < 2}
+                  disabled={!canSave}
                   className="rounded-md bg-black px-3 py-2 text-sm text-white disabled:opacity-50"
                 >
                     {submitting ? 'Saving...' : 'Save Item'}

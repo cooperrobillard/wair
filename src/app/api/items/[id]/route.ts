@@ -4,7 +4,18 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildStoragePaths } from "@/lib/storage-paths";
-import { normalizeMultiColor, normalizeToCanonArticle } from "@/lib/normalize";
+import { normalizeMultiColor } from "@/lib/normalize";
+import { normalizeArticleType } from "@/lib/normalizeArticle";
+import { deriveColorStd, debugColor } from "@/lib/normalizeColor";
+
+function parseStringOrNull(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  return undefined;
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -19,20 +30,30 @@ export async function PATCH(
   const imageUrl = typeof body?.imageUrl === "string" ? body.imageUrl.trim() : undefined;
   const originalUrl =
     typeof body?.originalUrl === "string" ? body.originalUrl.trim() : undefined;
-  const rawInput =
-    typeof body?.rawInput === "string" ? body.rawInput.trim() : undefined;
+  let rawInput: string | undefined;
+  if (body?.rawInput === null) {
+    rawInput = "";
+  } else if (typeof body?.rawInput === "string") {
+    rawInput = body.rawInput.trim();
+  } else if (body?.rawInput !== undefined) {
+    return NextResponse.json({ error: "rawInput must be a string" }, { status: 400 });
+  }
   const articleType =
     typeof body?.articleType === "string" ? body.articleType.trim() : undefined;
-  const colorRaw = typeof body?.colorRaw === "string" ? body.colorRaw.trim() : undefined;
+  const colorValue = parseStringOrNull(body?.color);
+  const colorRaw = parseStringOrNull(body?.colorRaw);
+  const colorStdInput = parseStringOrNull(body?.colorStd);
   const brand = typeof body?.brand === "string" ? body.brand.trim() : undefined;
   const name = typeof body?.name === "string" ? body.name.trim() : undefined;
+  const hasColorChange =
+    colorValue !== undefined || colorRaw !== undefined || colorStdInput !== undefined;
 
   if (
     imageUrl === undefined &&
     originalUrl === undefined &&
     rawInput === undefined &&
     articleType === undefined &&
-    colorRaw === undefined &&
+    !hasColorChange &&
     brand === undefined &&
     name === undefined
   ) {
@@ -56,12 +77,36 @@ export async function PATCH(
   if (originalUrl) data.originalUrl = originalUrl;
   if (rawInput !== undefined) data.rawInput = rawInput;
   if (articleType !== undefined) {
-    const canonicalArticle = articleType ? normalizeToCanonArticle(articleType) : null;
+    const canonicalArticle = articleType ? normalizeArticleType(articleType) : null;
     data.articleType = canonicalArticle ?? null;
   }
-  if (colorRaw !== undefined) {
-    const canonicalColor = colorRaw ? normalizeMultiColor(colorRaw) : null;
-    data.colorRaw = canonicalColor ?? null;
+  if (hasColorChange) {
+    const resolvedColorRaw = colorRaw !== undefined ? colorRaw : colorValue;
+    if (resolvedColorRaw !== undefined) {
+      const canonicalColor =
+        resolvedColorRaw && resolvedColorRaw.length > 0
+          ? normalizeMultiColor(resolvedColorRaw)
+          : null;
+      data.colorRaw = canonicalColor ?? resolvedColorRaw ?? null;
+    }
+    const deriveSource = colorStdInput === null ? null : colorValue ?? resolvedColorRaw ?? null;
+    debugColor("deriveColorStd.input.update", {
+      colorStdInput,
+      colorFromBody: colorValue,
+      colorRaw: resolvedColorRaw,
+    });
+    const derivedStd = deriveColorStd(colorStdInput, deriveSource ?? null);
+    debugColor("deriveColorStd.output.update", { colorStd: derivedStd });
+    data.colorStd = derivedStd ?? null;
+    const warnSource =
+      typeof colorStdInput === "string" && colorStdInput.length > 0
+        ? colorStdInput
+        : typeof deriveSource === "string"
+        ? deriveSource
+        : null;
+    if (warnSource && !derivedStd) {
+      console.warn("[items] color normalization returned null for:", warnSource);
+    }
   }
   if (brand !== undefined) data.brand = brand || null;
   if (name !== undefined) data.name = name || null;

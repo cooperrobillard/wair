@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getAuth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import { copyRemoteImageToSupabase } from "@/lib/image-ingest";
+import { deriveColorStd, debugColor } from "@/lib/normalizeColor";
+import { normalizeArticleType } from "@/lib/normalizeArticle";
 import type { ScrapedProduct } from "@/lib/scrape-helpers";
 
 type FromUrlBody = {
@@ -84,11 +86,51 @@ export async function POST(req: NextRequest) {
     }
 
     const providedRawInput = typeof rawInput === "string" ? rawInput : "";
+    const colorRawValue = product?.colorRaw ?? null;
+    debugColor("deriveColorStd.input.from-url", {
+      colorStdInput: undefined,
+      colorRaw: colorRawValue,
+    });
+    const colorStd = deriveColorStd(undefined, colorRawValue);
+    debugColor("deriveColorStd.output.from-url", { colorStd });
+
+    const canonicalArticle = normalizeArticleType(product?.type ?? null);
+
+    if (colorRawValue && colorStd === null) {
+      console.warn("[items] color normalization returned null for:", colorRawValue);
+    }
+
     if ((providedRawInput.trim() === "") && (product?.name || product?.brand || product?.colorRaw)) {
       const seed = [product?.brand, product?.name, product?.colorRaw].filter(Boolean).join(", ");
       if (seed) {
-        await prisma.item.update({ where: { id: item.id }, data: { rawInput: seed } });
+        await prisma.item.update({
+          where: { id: item.id },
+          data: {
+            rawInput: seed,
+            colorRaw: colorRawValue,
+            ...(colorStd !== null ? { colorStd } : {}),
+            ...(canonicalArticle !== null ? { articleType: canonicalArticle } : {}),
+          },
+        });
+      } else if (colorStd !== null || colorRawValue !== null) {
+        await prisma.item.update({
+          where: { id: item.id },
+          data: {
+            ...(colorRawValue !== null ? { colorRaw: colorRawValue } : {}),
+            ...(colorStd !== null ? { colorStd } : { colorStd: null }),
+            ...(canonicalArticle !== null ? { articleType: canonicalArticle } : {}),
+          },
+        });
       }
+    } else if (colorStd !== null || colorRawValue !== null) {
+      await prisma.item.update({
+        where: { id: item.id },
+        data: {
+          ...(colorRawValue !== null ? { colorRaw: colorRawValue } : {}),
+          ...(colorStd !== null ? { colorStd } : { colorStd: null }),
+          ...(canonicalArticle !== null ? { articleType: canonicalArticle } : {}),
+        },
+      });
     }
 
     return NextResponse.json({ ok: true, id: item.id, product, pathUsed: pathUsed ?? undefined });

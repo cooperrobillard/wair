@@ -5,11 +5,13 @@ import { MoreVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import type { BulkDeleteResponse } from '@/types/api';
 import NewItemDialog from '@/components/NewItemDialog';
+import ColorSwatch from '@/components/ColorSwatch';
 
 export type UIItem = {
   id: string;
   rawInput: string | null;
   articleType: string | null;
+  colorStd: string | null;
   colorRaw: string | null;
   name: string | null;
   brand: string | null;
@@ -21,6 +23,7 @@ export type UIItem = {
 
 type Props = {
   initialItems: UIItem[];
+  initialSelectionMode?: boolean;
 };
 
 function formatSourceLink(url: string | null) {
@@ -34,16 +37,24 @@ function formatSourceLink(url: string | null) {
   }
 }
 
-export default function ItemGrid({ initialItems }: Props) {
+export default function ItemGrid({ initialItems, initialSelectionMode = false }: Props) {
   const [items, setItems] = React.useState<UIItem[]>(initialItems);
   const [openMenuId, setOpenMenuId] = React.useState<string | null>(null);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const menuRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
-  const [selectionMode, setSelectionMode] = React.useState(false);
+  const [selectionMode, setSelectionMode] = React.useState(initialSelectionMode);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
   const [bulkDeleting, setBulkDeleting] = React.useState(false);
   const [editingItem, setEditingItem] = React.useState<UIItem | null>(null);
   const [editOpen, setEditOpen] = React.useState(false);
+
+  if (!items.length) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No items match these filters. Try clearing filters or adjusting your search.
+      </p>
+    );
+  }
 
   React.useEffect(() => {
     function handlePointer(event: MouseEvent | TouchEvent) {
@@ -99,17 +110,6 @@ export default function ItemGrid({ initialItems }: Props) {
       return changed ? next : prev;
     });
   }, [items]);
-
-  const toggleSelectionMode = React.useCallback(() => {
-    setOpenMenuId(null);
-    setSelectionMode((current) => {
-      const next = !current;
-      if (!next) {
-        setSelectedIds(new Set());
-      }
-      return next;
-    });
-  }, []);
 
   const toggleItemSelection = React.useCallback((itemId: string) => {
     setSelectedIds((prev) => {
@@ -279,32 +279,35 @@ export default function ItemGrid({ initialItems }: Props) {
     setOpenMenuId(null);
   }, []);
 
+  React.useEffect(() => {
+    setSelectionMode(initialSelectionMode);
+  }, [initialSelectionMode]);
+
+  React.useEffect(() => {
+    if (!selectionMode) {
+      setSelectedIds(new Set());
+    }
+  }, [selectionMode]);
+
   return (
     <>
       <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={toggleSelectionMode}
-          className="rounded-md border px-3 py-1 text-sm hover:bg-muted"
-        >
-          {selectionMode ? 'Cancel select' : 'Select'}
-        </button>
-        {selectedCount > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              void handleBulkDelete();
-            }}
-            disabled={bulkDeleting}
-            className="rounded-md bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {bulkDeleting
-              ? 'Deleting...'
-              : `Delete selected (${selectedCount})`}
-          </button>
-        )}
-      </div>
+      {selectionMode && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {selectedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                void handleBulkDelete();
+              }}
+              disabled={bulkDeleting}
+              className="rounded-md bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {bulkDeleting ? 'Deleting...' : `Delete selected (${selectedCount})`}
+            </button>
+          )}
+        </div>
+      )}
 
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -318,7 +321,12 @@ export default function ItemGrid({ initialItems }: Props) {
             const displayName = item.name && item.name.trim().length ? item.name.trim() : 'Untitled';
             const displayBrand = item.brand && item.brand.trim().length ? item.brand.trim() : undefined;
             const displayArticle = item.articleType && item.articleType.trim().length ? item.articleType.trim() : '—';
-            const displayColor = item.colorRaw && item.colorRaw.trim().length ? item.colorRaw.trim() : undefined;
+            const rawColor = item.colorRaw && item.colorRaw.trim().length ? item.colorRaw.trim() : undefined;
+            const swatchLabel = item.colorStd && item.colorStd.trim().length ? item.colorStd.trim() : rawColor;
+            const metadataParts = [displayBrand, displayArticle, swatchLabel].filter(
+              (value): value is string => Boolean(value && value.length)
+            );
+            const metadataText = metadataParts.length > 0 ? metadataParts.join(' • ') : '—';
             return (
               <li
                 key={item.id}
@@ -421,15 +429,10 @@ export default function ItemGrid({ initialItems }: Props) {
 
                 <div className="mt-2 space-y-1">
                   <div className="space-y-0.5">
-                    <h3 className="text-sm font-semibold leading-tight line-clamp-2">
-                      {displayName}
-                      {displayBrand ? (
-                        <span className="text-muted-foreground"> · {displayBrand}</span>
-                      ) : null}
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      {displayArticle}
-                      {displayColor ? ` · ${displayColor}` : ''}
+                    <h3 className="text-sm font-semibold leading-tight line-clamp-2">{displayName}</h3>
+                    <p className="text-xs text-muted-foreground flex items-center gap-2">
+                      {swatchLabel ? <ColorSwatch label={swatchLabel} size={10} /> : null}
+                      {metadataText}
                     </p>
                   </div>
                   {(() => {
