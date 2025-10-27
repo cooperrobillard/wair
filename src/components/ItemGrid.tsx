@@ -6,20 +6,9 @@ import { toast } from 'sonner';
 import type { BulkDeleteResponse } from '@/types/api';
 import NewItemDialog from '@/components/NewItemDialog';
 import ColorSwatch from '@/components/ColorSwatch';
+import type { QueryItem } from '@/lib/query-items';
 
-export type UIItem = {
-  id: string;
-  rawInput: string | null;
-  articleType: string | null;
-  colorStd: string | null;
-  colorRaw: string | null;
-  name: string | null;
-  brand: string | null;
-  sourceUrl: string | null;
-  imageUrl: string | null;
-  originalUrl: string | null;
-  createdAt: string;
-};
+export type UIItem = QueryItem;
 
 type Props = {
   initialItems: UIItem[];

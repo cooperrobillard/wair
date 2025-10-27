@@ -43,6 +43,20 @@ function buildWhere(filters: ItemFilters) {
   return where;
 }
 
+export type QueryItem = {
+  id: string;
+  rawInput: string | null;
+  articleType: string | null;
+  colorStd: string | null;
+  colorRaw: string | null;
+  name: string | null;
+  brand: string | null;
+  sourceUrl: string | null;
+  imageUrl: string | null;
+  originalUrl: string | null;
+  createdAt: string;
+};
+
 export async function queryItems(filters: ItemFilters) {
   const where = buildWhere(filters);
   const take = clampLimit(filters.limit);
@@ -73,6 +87,9 @@ export async function queryItems(filters: ItemFilters) {
       brand: true,
       articleType: true,
       colorStd: true,
+      colorRaw: true,
+      sourceUrl: true,
+      originalUrl: true,
       createdAt: true,
     },
   });
@@ -83,7 +100,21 @@ export async function queryItems(filters: ItemFilters) {
     nextCursor = extra ? extra.id : null;
   }
 
-  return { items, nextCursor };
+  const normalized: QueryItem[] = items.map((item) => ({
+    id: item.id,
+    rawInput: item.rawInput ?? null,
+    articleType: item.articleType ?? null,
+    colorStd: item.colorStd ?? null,
+    colorRaw: item.colorRaw ?? null,
+    name: item.name ?? null,
+    brand: item.brand ?? null,
+    sourceUrl: item.sourceUrl ?? null,
+    imageUrl: item.imageUrl ?? null,
+    originalUrl: item.originalUrl ?? null,
+    createdAt: item.createdAt.toISOString(),
+  }));
+
+  return { items: normalized, nextCursor };
 }
 
 export type FacetBucket = { value: string; count: number };
